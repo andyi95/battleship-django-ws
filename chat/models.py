@@ -1,5 +1,5 @@
 from django.db import models
-from random import choice, randint, shuffle
+from random import randint
 
 
 class Board(models.Model):
@@ -14,14 +14,26 @@ class Board(models.Model):
             if start_x + size > self.rows:
                 return None
             for x in range(0, size):
-                if Location.objects.filter(board=self, row=start_x+x, col=start_y).exists():
+                x = start_x+x
+                y = start_y
+                r = [x-1, x, x+1]
+                c = [y-1, y, y+1]
+                if Location.objects.filter(
+                    board=self, row__in=r, col__in=c
+                ).exists():
                     return f'The location {start_x+x}x{start_y} is busy'
                 locations.append((start_x+x,start_y))
         if orientation == 'vertical':
             if start_y + size > self.cols:
                 return None
             for y in range(0, size):
-                if Location.objects.filter(board=self, row=start_x, col=start_y+y).exists():
+                x = start_x
+                y = start_y+y
+                r = [x-1, x, x+1]
+                c = [y-1, y, y+1]
+                if Location.objects.filter(
+                        board=self, row__in=r, col__in=c
+                ).exists():
                     return f'The location {start_x}x{start_y} is busy'
                 locations.append((start_x, start_y+y))
         ship = Ship.objects.create(board=self)
@@ -32,14 +44,15 @@ class Board(models.Model):
         return ship
 
     def full_board(self):
+        """Get board with marked busy places."""
         board = [[0] * self.rows for _ in range(self.cols)]
         for x in range(0, self.rows):
             for y in range(0, self.cols):
                 if Location.objects.filter(board=self, col=x, row=y).exists():
-                    board[x][y] = '1'
+                    board[x][y-1] = '1'
         return board
 
-    def build_ships(self, amount=4 ,min_ship_size=1, max_ship_size=4):
+    def build_ships(self,min_ship_size=1, max_ship_size=4):
         size = randint(min_ship_size, max_ship_size)
         orientation = 'horizontal' if randint(0, 1) == 0 else 'vertical'
         locations_tried = []
@@ -51,6 +64,8 @@ class Board(models.Model):
             else:
                 locations_tried.append((x,y))
             ship = self.new_ship(orientation, (x, y), size)
+            if not ship:
+                continue
             return ship
         return None
 
@@ -62,8 +77,10 @@ class Board(models.Model):
         return None
 
     def shot(self, location):
-        ship = self.check_for_hit(location)
         (x, y) = location
+        ship = Ship.objects.filter(
+            location__row=x, location__col=y, board=self
+        ).first()
         if ship:
             ship.location.filter(row=x, col=y).delete()
             if not ship.location.exists():
@@ -72,45 +89,28 @@ class Board(models.Model):
             return 'Hit'
         return 'Loose'
 
-    def get_location(self, size, orientation):
-        locations = []
-        if orientation == 'horizontal':
-            for r in range(self.rows):
-                for c in range(self.cols - size + 1):
-                    if not Location.objects.filter(row=r, col=c, board=self).exists():
-                        locations.append({'row': r, 'col': c})
-        elif orientation == 'vertical':
-                for c in range(self.cols):
-                    for r in range(self.rows - size + 1):
-                        if not Location.objects.filter(row=r, col=c, board=self).exists():
-                            locations.append({'row': r, 'col': c})
-        if not locations:
-            return None
-        return locations
 
 class Location(models.Model):
     row = models.IntegerField()
     col = models.IntegerField()
-    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name='locations')
+    board = models.ForeignKey(
+        Board, on_delete=models.CASCADE,
+        related_name='locations'
+    )
 
 
 class Ship(models.Model):
     location = models.ManyToManyField(Location, related_name='ship')
-    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name='ship')
+    board = models.ForeignKey(
+        Board, on_delete=models.CASCADE,
+        related_name='ship'
+    )
 
     def __str__(self):
         return f'Ship id {self.id}'
-
-
-    def check_for_hit(self, coordinates):
-        (row, col) = coordinates
-        for location in self.location.all():
-            if row == str(location.row) and col == str(location.col):
-                return True
 
     def tulpe_locations(self):
         locations = []
         for location in self.location.all():
             locations.append((location.row, location.col))
         return locations
-
